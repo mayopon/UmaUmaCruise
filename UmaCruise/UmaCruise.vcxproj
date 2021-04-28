@@ -153,6 +153,9 @@
     </Midl>
     <Manifest />
     <Manifest />
+    <PostBuildEvent>
+      <Command>cmd /c (robocopy "$(SolutionDir)UmaLibrary" "$(TargetDir)UmaLibrary" *.json) ^&amp; IF %ERRORLEVEL% LSS 8 exit 0</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -212,7 +215,9 @@
       <DllDataFileName />
     </Midl>
     <PostBuildEvent>
-      <Command>copy "$(targetPath)" "$(SolutionDir)#Release\UmaUmaCruise\UmaUmaCruise.exe"</Command>
+      <Command>copy "$(targetPath)" "$(SolutionDir)#Release\UmaUmaCruise\UmaUmaCruise.exe"
+cmd /c (robocopy "$(SolutionDir)UmaLibrary" "$(TargetDir)UmaLibrary" *.json) ^&amp; IF %ERRORLEVEL% LSS 8 exit 0
+cmd /c (robocopy "$(SolutionDir)UmaLibrary" "$(SolutionDir)#Release\UmaUmaCruise\UmaLibrary" *.json) ^&amp; IF %ERRORLEVEL% LSS 8 exit 0</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
