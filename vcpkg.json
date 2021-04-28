@@ -1,0 +1,27 @@
+{
+  "name": "umaumacruise",
+  "version-string": "1.4",
+  "dependencies": [
+    {
+      "name": "tesseract"
+    },
+    {
+      "name": "opencv4",
+      "features": [
+        "world"
+      ]
+    },
+    {
+      "name": "boost-filesystem"
+    },
+    {
+      "name": "boost-log"
+    },
+    {
+      "name": "boost-timer"
+    },
+    {
+      "name": "wtl"
+    }
+  ]
+}
