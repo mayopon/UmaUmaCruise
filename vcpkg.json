@@ -1,27 +1,35 @@
 {
-  "name": "umaumacruise",
-  "version-string": "1.4",
-  "dependencies": [
-    {
-      "name": "tesseract"
-    },
-    {
-      "name": "opencv4",
-      "features": [
-        "world"
-      ]
-    },
-    {
-      "name": "boost-filesystem"
-    },
-    {
-      "name": "boost-log"
-    },
-    {
-      "name": "boost-timer"
-    },
-    {
-      "name": "wtl"
-    }
-  ]
+    "name": "umaumacruise",
+    "version": "1.4.0",
+    "port-version": 0,
+    "dependencies": [
+        {
+            "name": "tesseract",
+            "version>=": "4.1.1#8"
+        },
+        {
+            "name": "opencv4",
+            "features": [
+                "world"
+            ],
+            "version>=": "4.5.1"
+        },
+        {
+            "name": "boost-filesystem",
+            "version>=": "1.75.0#1"
+        },
+        {
+            "name": "boost-log",
+            "version>=": "1.75.0"
+        },
+        {
+            "name": "boost-timer",
+            "version>=": "1.75.0#1"
+        },
+        {
+            "name": "wtl",
+            "version>=": "10.0.10320"
+        }
+    ],
+    "builtin-baseline": "b9cd2a7958dec657fb869ec487d2a98cf39a8d48"
 }
