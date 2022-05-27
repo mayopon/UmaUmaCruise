@@ -14,6 +14,8 @@
 #define IDC_EDIT_NOWDATE                1008
 #define IDC_LIST_RACE                   1009
 #define IDC_COMBO_UMAMUSUME             1010
+#define IDC_EDIT_NOWDATE2               1010
+#define IDC_EDIT_REMAININGTURN          1010
 #define IDC_COMBO_TESTBOUNDS            1011
 #define IDC_EDIT_RESULT                 1012
 #define IDC_BUTTON_OCR                  1013
@@ -40,15 +42,24 @@
 #define IDC_CHECK_NOTIFY_FAVORITERACEHOLD 1040
 #define IDC_EDIT1                       1041
 #define IDC_EDIT_EXPECT_URA             1041
+#define IDC_CHECK_TOPMOST               1041
+#define IDC_CHECK_WINDOW_TOPMOST        1041
 #define IDC_SYSLINK_HOMEPAGE            1042
 #define IDC_SYSLINK3                    1043
 #define IDC_SYSLINK_VERSIONCHECK        1043
 #define IDC_COMBO1                      1044
 #define IDC_COMBO_THEME                 1044
+#define IDC_COMBO_SCENARIO_RACE         1044
 #define IDC_RICHEDIT21                  1045
 #define IDC_RICHEDIT22                  1046
 #define IDC_RICHEDIT23                  1047
-#define IDC_GROUP_OPTION				1048
+#define IDC_GROUP_OPTION                1048
+#define IDC_EDIT_SS_FOLDER              1060
+#define IDC_BUTTON_SS_SELECT            1061
+#define IDC_RADIO_GDI                   1070
+#define IDC_RADIO_DESKTOPDUPLICATION    1071
+#define IDC_RADIO3                      1072
+#define IDC_RADIO_WINDOWSGRAPHICSCAPTURE 1072
 #define IDC_EDIT_OPTION1                1500
 #define IDC_EDIT_OPTION2                1501
 #define IDC_EDIT_OPTION3                1502
@@ -85,9 +96,9 @@
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        210
+#define _APS_NEXT_RESOURCE_VALUE        211
 #define _APS_NEXT_COMMAND_VALUE         32775
-#define _APS_NEXT_CONTROL_VALUE         1049
+#define _APS_NEXT_CONTROL_VALUE         1071
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

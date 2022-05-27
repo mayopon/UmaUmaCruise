@@ -22,14 +22,22 @@ public:
 	enum { IDD = IDD_RACELIST };
 
 	enum {
-		kDockingMargin = 15
+		kDockingMargin = 15,
+
+		kFavoriteRaceListVersion = 1,
 	};
+
+	enum ScenarioRace {
+		kURA_AOHARU = 0,	// URA or AOHARU
+		kMNT = 1,			// Make a newtrack
+	};
+
 
 	RaceListWindow(const Config& config) : m_config(config) {}
 
 	void	ShowWindow(bool bShow);
 
-	void	AnbigiousChangeCurrentTurn(const std::vector<std::wstring>& ambiguousCurrentTurn);
+	void	AnbigiousChangeCurrentTurn(const std::vector<std::wstring>& ambiguousCurrentTurn, bool ikuseiTop);
 
 	void	EntryRaceDistance(int distance);
 
@@ -43,6 +51,7 @@ public:
 		// Race
 		DDX_TEXT(IDC_EDIT_NOWDATE, m_currentTurn)
 		DDX_CHECK(IDC_CHECK_SHOWRACE_AFTERCURRENTDATE, m_showRaceAfterCurrentDate)
+		DDX_TEXT(IDC_EDIT_REMAININGTURN, m_remaingTurn)
 
 		DDX_CHECK(IDC_CHECK_G1, m_gradeG1)
 		DDX_CHECK(IDC_CHECK_G2, m_gradeG2)
@@ -62,6 +71,7 @@ public:
 
 		DDX_CONTROL_HANDLE(IDC_LIST_RACE, m_raceListView)
 		DDX_CONTROL_HANDLE(IDC_EDIT_EXPECT_URA, m_editExpectURA)
+		DDX_CONTROL_HANDLE(IDC_COMBO_SCENARIO_RACE, m_cmbScenarioRace)		
 	END_DDX_MAP()
 
 	BEGIN_MSG_MAP_EX(RaceListWindow)
@@ -78,6 +88,8 @@ public:
 
 		NOTIFY_HANDLER_EX(IDC_LIST_RACE, NM_CLICK, OnRaceListClick)
 		NOTIFY_HANDLER_EX(IDC_LIST_RACE, NM_RCLICK, OnRaceListRClick)
+
+		COMMAND_HANDLER_EX(IDC_COMBO_SCENARIO_RACE, CBN_SELCHANGE, OnScenarioRaceChange)
 
 		// Race List
 		COMMAND_ID_HANDLER_EX(IDC_CHECK_SHOWRACE_AFTERCURRENTDATE, OnShowRaceAfterCurrentDate)
@@ -98,6 +110,8 @@ public:
 	LRESULT OnRaceListClick(LPNMHDR pnmh);
 	LRESULT OnRaceListRClick(LPNMHDR pnmh);
 
+	void OnScenarioRaceChange(UINT uNotifyCode, int nID, CWindow wndCtl);
+
 	void OnShowRaceAfterCurrentDate(UINT uNotifyCode, int nID, CWindow wndCtl);
 	void OnRaceFilterChanged(UINT uNotifyCode, int nID, CWindow wndCtl);
 
@@ -110,6 +124,8 @@ private:
 	void	_SwitchFavoriteRace(int index);
 	bool	_IsFavoriteRaceTurn(const std::wstring& turn);
 
+	std::string	_GetCurrentFavoriteRaceListName();
+
 	enum RaceHighlightFlag {
 		kAlter = 1 << 0,
 		kFavorite = 1 << 1,
@@ -118,7 +134,8 @@ private:
 	const Config&	m_config;
 	RaceDateLibrary	m_raceDateLibrary;
 
-	CString	m_currentTurn;
+	CString	m_currentTurn;	// 現在のターン
+	CString m_remaingTurn;	// 次のレースまでのターン数
 
 	bool	m_showRaceAfterCurrentDate = true;
 
@@ -142,6 +159,7 @@ private:
 
 	CListViewCtrl	m_raceListView;
 	CEdit			m_editExpectURA;
+	CComboBox		m_cmbScenarioRace;
 
 	std::wstring	m_currentIkuseUmaMusume;
 	nlohmann::json	m_jsonCharaFavoriteRaceList;
@@ -168,5 +186,7 @@ private:
 	};
 	ThemeColor	m_darkTheme;
 	ThemeColor	m_lightTheme;
+
+	bool	m_bTurnChanged = false;
 };
 

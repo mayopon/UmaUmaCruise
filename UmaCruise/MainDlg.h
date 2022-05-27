@@ -6,6 +6,7 @@
 
 #include <thread>
 #include <atomic>
+#include <memory>
 
 #include "UmaEventLibrary.h"
 #include "RaceDateLibrary.h"
@@ -21,7 +22,7 @@
 #include "Config.h"
 
 #include "DarkModeUI.h"
-
+#include "IScreenShotWindow.h"
 
 class CMainDlg : 
 	public CDialogImpl<CMainDlg>, 
@@ -35,8 +36,8 @@ public:
 	enum { IDD = IDD_MAINDLG };
 
 	enum {
-		kAutoOCRTimerID = 1,
-		kAutoOCRTimerInterval = 1000,
+		kSearchUmaMusumeNameTimerID = 1,
+		kSearchUmaMusumeNameTimerInterval = 50,
 
 		kMaxOptionEffect = 4,
 		kMaxEffectTextLength = 1024,
@@ -67,6 +68,7 @@ public:
 		DDX_CONTROL_HANDLE(IDC_COMBO_UMAMUSUME, m_cmbUmaMusume)
 		DDX_TEXT(IDC_EDIT_EVENTNAME, m_eventName)
 		DDX_TEXT(IDC_EDIT_EVENT_SOURCE, m_eventSource)
+		DDX_CONTROL(IDC_BUTTON_SCREENSHOT, m_wndScreenShotButton)
 	END_DDX_MAP()
 
 
@@ -80,6 +82,9 @@ public:
 		COMMAND_ID_HANDLER_EX(IDC_BUTTON_PREVIEW, OnShowPreviewWindow)
 		MSG_WM_TIMER(OnTimer)
 		COMMAND_HANDLER_EX(IDC_COMBO_UMAMUSUME, CBN_SELCHANGE, OnSelChangeUmaMusume)
+		COMMAND_HANDLER_EX(IDC_COMBO_UMAMUSUME, CBN_EDITCHANGE, OnUmaMusumeEditChange)
+		COMMAND_HANDLER_EX(IDC_COMBO_UMAMUSUME, CBN_CLOSEUP, OnUmaMusumeDropDownClose)
+		
 
 		MESSAGE_HANDLER_EX(WM_ENTERSIZEMOVE, OnDockingProcess)
 		MESSAGE_HANDLER_EX(WM_MOVING, OnDockingProcess)
@@ -101,7 +106,7 @@ public:
 
 		CHAIN_MSG_MAP(DarkModeUI<CMainDlg>)
 	ALT_MSG_MAP(1)
-		//MSG_WM_SETCURSOR(OnSetCursor)
+		MSG_WM_RBUTTONUP(OnScreenShotButtonUp)
 	END_MSG_MAP()
 
 // Handler prototypes (uncomment arguments if needed):
@@ -120,6 +125,8 @@ public:
 	void	OnShowPreviewWindow(UINT uNotifyCode, int nID, CWindow wndCtl);
 	void	OnTimer(UINT_PTR nIDEvent);
 	void	OnSelChangeUmaMusume(UINT uNotifyCode, int nID, CWindow wndCtl);
+	void	OnUmaMusumeEditChange(UINT uNotifyCode, int nID, CWindow wndCtl);
+	void	OnUmaMusumeDropDownClose(UINT uNotifyCode, int nID, CWindow wndCtl);
 
 	LRESULT OnDockingProcess(UINT uMsg, WPARAM wParam, LPARAM lParam);
 
@@ -135,13 +142,18 @@ public:
 	// for EffectEdit
 	BOOL OnSetCursor(CWindow wnd, UINT nHitTest, UINT message);
 
+	void OnScreenShotButtonUp(UINT nFlags, CPoint point);
+
 private:
+	bool	_ReloadUmaMusumeLibrary(bool initComboOnly = false);
 	void	_DockOrPopupRaceListWindow();
 	void	_ExtentOrShrinkWindow(bool bExtent);
 	void	_SwitchRow3Row4(bool row3);
 
 	void	_UpdateEventOptions(const UmaEventLibrary::UmaEvent& umaEvent);
 	void	_UpdateEventEffect(CRichEditCtrl richEdit, const std::wstring& effectText);
+
+	std::unique_ptr<Gdiplus::Bitmap>	_ScreenShotUmaWindow();
 
 	Config	m_config;
 	bool	m_bShowRaceList = true;
@@ -156,6 +168,7 @@ private:
 	CString	m_targetWindowName;
 	CString m_targetClassName;
 
+	CContainedWindow	m_wndScreenShotButton;
 	CComboBox	m_cmbUmaMusume;
 	COLORREF	m_optionBkColor[kMaxOptionEffect];
 	CBrush	m_brsOptions[kMaxOptionEffect];
@@ -176,4 +189,7 @@ private:
 	CPoint	m_ptRelativeDockingPos;
 
 	bool	m_effectRow3 = false;
+
+	std::mutex	m_mtxScreennShotWindow;
+	std::unique_ptr<IScreenShotWindow>	m_screenshotWindow;
 };

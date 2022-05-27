@@ -30,6 +30,9 @@ bool Config::LoadConfig()
 	popupRaceListWindow = jsonSetting["Config"].value("PopupRaceListWindow", popupRaceListWindow);
 	notifyFavoriteRaceHold = jsonSetting["Config"].value("NotifyFavoriteRaceHold", notifyFavoriteRaceHold);
 	theme = jsonSetting["Config"].value("Theme", theme);
+	windowTopMost = jsonSetting["Config"].value("WindowTopMost", windowTopMost);
+	screenShotFolder = UTF16fromUTF8(jsonSetting["Config"].value("ScreenShotFolder", ""));
+	screenCaptureMethod = jsonSetting["Config"].value("ScreenCaptureMethod", screenCaptureMethod);
 
     return true;
 }
@@ -49,6 +52,9 @@ void Config::SaveConfig()
 	jsonSetting["Config"]["PopupRaceListWindow"] = popupRaceListWindow;
 	jsonSetting["Config"]["NotifyFavoriteRaceHold"] = notifyFavoriteRaceHold;
 	jsonSetting["Config"]["Theme"] = theme;
+	jsonSetting["Config"]["WindowTopMost"] = windowTopMost;
+	jsonSetting["Config"]["ScreenShotFolder"] = UTF8fromUTF16(screenShotFolder.wstring());
+	jsonSetting["Config"]["ScreenCaptureMethod"] = screenCaptureMethod;
 
 	std::ofstream ofs((GetExeDirectory() / "setting.json").wstring());
 	ofs << jsonSetting.dump(4);

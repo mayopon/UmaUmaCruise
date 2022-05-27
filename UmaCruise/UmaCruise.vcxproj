@@ -27,26 +27,27 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -131,6 +132,8 @@
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>_WINDOWS;STRICT;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/source-charset:utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <ConformanceMode>false</ConformanceMode>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -196,6 +199,8 @@ cmd /c (robocopy "$(SolutionDir)tessdata" "$(TargetDir)tessdata" /s) ^&amp; IF %
       <DebugInformationFormat />
       <PreprocessorDefinitions>_WINDOWS;STRICT;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/source-charset:utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <ConformanceMode>false</ConformanceMode>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -245,7 +250,10 @@ cmd /c (robocopy "$(SolutionDir)tessdata" "$(TargetDir)tessdata" /s) ^&amp; IF %
     <ClCompile Include="UmaTextRecognizer.cpp" />
     <ClCompile Include="Utility\CodeConvert.cpp" />
     <ClCompile Include="Utility\CommonUtility.cpp" />
-    <ClCompile Include="Utility\GdiplusUtil.cpp" />
+    <ClCompile Include="Utility\GdiplusUtil.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="Utility\Logger.cpp" />
     <ClCompile Include="Utility\WinHTTPWrapper.cpp" />
     <ClCompile Include="win32-darkmode\DarkMode.cpp">
@@ -260,6 +268,9 @@ cmd /c (robocopy "$(SolutionDir)tessdata" "$(TargetDir)tessdata" /s) ^&amp; IF %
     <ClInclude Include="Config.h" />
     <ClInclude Include="ConfigDlg.h" />
     <ClInclude Include="DarkModeUI.h" />
+    <ClInclude Include="DesktopDuplication.h" />
+    <ClInclude Include="GDIWindowCapture.h" />
+    <ClInclude Include="IScreenShotWindow.h" />
     <ClInclude Include="MainDlg.h" />
     <ClInclude Include="PreviewWindow.h" />
     <ClInclude Include="RaceDateLibrary.h" />
@@ -291,6 +302,7 @@ cmd /c (robocopy "$(SolutionDir)tessdata" "$(TargetDir)tessdata" /s) ^&amp; IF %
     <ClInclude Include="win32-darkmode\IatHook.h" />
     <ClInclude Include="win32-darkmode\ListViewUtil.h" />
     <ClInclude Include="win32-darkmode\win32-darkmode.h" />
+    <ClInclude Include="WindowsGraphicsCaptureWrapper.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="UmaCruise.rc" />

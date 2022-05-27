@@ -54,10 +54,17 @@ void RaceListWindow::ShowWindow(bool bShow)
 	__super::ShowWindow(bShow);
 }
 
-void RaceListWindow::AnbigiousChangeCurrentTurn(const std::vector<std::wstring>& ambiguousCurrentTurn)
+void RaceListWindow::AnbigiousChangeCurrentTurn(const std::vector<std::wstring>& ambiguousCurrentTurn, bool ikuseiTop)
 {
 	std::wstring currentTurn = m_raceDateLibrary.AnbigiousChangeCurrentTurn(ambiguousCurrentTurn);
 	if (currentTurn.length() && m_currentTurn != currentTurn.c_str()) {
+		// ターン更新時
+		m_bTurnChanged = true;
+
+		_UpdateRaceList(currentTurn);
+	}
+	if (m_bTurnChanged && ikuseiTop) {
+		m_bTurnChanged = false;
 
 		if (m_config.notifyFavoriteRaceHold && _IsFavoriteRaceTurn(currentTurn)) {	// 通知する
 			// ウィンドウを振動させる
@@ -88,10 +95,8 @@ void RaceListWindow::AnbigiousChangeCurrentTurn(const std::vector<std::wstring>&
 				// 元の位置に戻す
 				wndTop.SetWindowPos(NULL, rcOriginal.left, rcOriginal.top, 0, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_ASYNCWINDOWPOS);
 
-			}).detach();
+				}).detach();
 		}
-
-		_UpdateRaceList(currentTurn);
 	}
 }
 
@@ -100,6 +105,8 @@ void RaceListWindow::EntryRaceDistance(int distance)
 	if (distance == 0 || m_currentTurn.IsEmpty() || m_currentTurn == L"ファイナルズ開催中") {
 		return;
 	}
+
+	m_bTurnChanged = false;	// レース終了後に通知が来ないように
 	
 	const int currentTurn = m_raceDateLibrary.GetTurnNumberFromTurnName((LPCWSTR)m_currentTurn);
 	ATLASSERT(currentTurn != -1);
@@ -211,9 +218,17 @@ void RaceListWindow::ChangeIkuseiUmaMusume(const std::wstring& umaName)
 		m_currentFavoriteRaceList.clear();
 		if (umaName.length()) {
 			// お気に入りレースを切り替え
-			const json& jCharaFavoriteRaceList = m_jsonCharaFavoriteRaceList[UTF8fromUTF16(umaName)];
-			if (jCharaFavoriteRaceList.is_array()) {
-				m_currentFavoriteRaceList = jCharaFavoriteRaceList.get<std::unordered_set<std::string>>();
+			json& jChara = m_jsonCharaFavoriteRaceList[UTF8fromUTF16(umaName)];
+			if (jChara.is_object()) {
+				json& jCharaFavoriteRaceList = jChara[_GetCurrentFavoriteRaceListName()];
+				if (jCharaFavoriteRaceList.is_array()) {
+					m_currentFavoriteRaceList = jCharaFavoriteRaceList.get<std::unordered_set<std::string>>();
+				}
+				// レースチェック状態の切り替え
+				int32_t state = jChara.value<int32_t>("RaceMatchState", -1);
+				if (state != -1) {
+					_SetRaceMatchState(state);
+				}
 			}
 		}
 		m_currentIkuseUmaMusume = umaName;
@@ -296,6 +311,10 @@ LRESULT RaceListWindow::OnInitDialog(UINT, WPARAM, LPARAM, BOOL&)
 	funcAddColumn(L"方向", 4, 38);
 	funcAddColumn(L"レース場", 5, 57);
 
+	m_cmbScenarioRace.AddString(L"URA/AO");
+	m_cmbScenarioRace.AddString(L"MNT");
+	m_cmbScenarioRace.SetCurSel(0);
+
 	// 設定読み込み
 	{
 		std::ifstream fs((GetExeDirectory() / "setting.json").wstring());
@@ -309,6 +328,9 @@ LRESULT RaceListWindow::OnInitDialog(UINT, WPARAM, LPARAM, BOOL&)
 				const int32_t state = jsonSetting["MainDlg"].value<int32_t>("RaceMatchState", -1);
 				_SetRaceMatchState(state);
 			}
+
+			const int scenarioRaceIndex = jsonSetting["MainDlg"].value<int>("ScenarioRaceIndex", kURA_AOHARU);
+			m_cmbScenarioRace.SetCurSel(scenarioRaceIndex);
 		} else {
 			_SetRaceMatchState(-1);
 		}
@@ -363,12 +385,15 @@ LRESULT RaceListWindow::OnDestroy(UINT, WPARAM, LPARAM, BOOL&)
 		jsonSetting["MainDlg"]["ShowRaceAfterCurrentDate"] = m_showRaceAfterCurrentDate;
 		jsonSetting["MainDlg"]["RaceMatchState"] = _GetRaceMatchState();
 
+		jsonSetting["MainDlg"]["ScenarioRaceIndex"] = m_cmbScenarioRace.GetCurSel();
+
 		std::ofstream ofs((GetExeDirectory() / "setting.json").wstring());
 		ofs << jsonSetting.dump(4);
 		ofs.close();
 	}
 	{
 		std::ofstream ofs((GetExeDirectory() / "CharaFavoriteRaceList.json").wstring());
+		m_jsonCharaFavoriteRaceList["*Version*"] = kFavoriteRaceListVersion;
 		ofs << m_jsonCharaFavoriteRaceList.dump(4);
 		ofs.close();
 	}
@@ -461,12 +486,24 @@ LRESULT RaceListWindow::OnRaceListRClick(LPNMHDR pnmh)
 	return LRESULT();
 }
 
+void RaceListWindow::OnScenarioRaceChange(UINT uNotifyCode, int nID, CWindow wndCtl)
+{
+	const int index = m_cmbScenarioRace.GetCurSel();
+	ATLASSERT(kURA_AOHARU <= index && index <= kMNT);
+	//ATLTRACE(L"m_cmbScenarioRace.GetCurSel: %d\n", index);
+
+	std::wstring ikuseiUmaMusume;
+	std::swap(ikuseiUmaMusume, m_currentIkuseUmaMusume);
+	ChangeIkuseiUmaMusume(ikuseiUmaMusume);	// update	
+}
+
 void RaceListWindow::OnShowRaceAfterCurrentDate(UINT uNotifyCode, int nID, CWindow wndCtl)
 {
 	DoDataExchange(DDX_SAVE);
 	_UpdateRaceList((LPCWSTR)m_currentTurn);
 }
 
+// レース一覧のチェック切り替え時
 void RaceListWindow::OnRaceFilterChanged(UINT uNotifyCode, int nID, CWindow wndCtl)
 {
 	DoDataExchange(DDX_SAVE);
@@ -493,6 +530,11 @@ void RaceListWindow::OnRaceFilterChanged(UINT uNotifyCode, int nID, CWindow wndC
 		DoDataExchange(DDX_LOAD);
 	}
 
+	if (m_currentIkuseUmaMusume.length()) {
+		auto& jChara = m_jsonCharaFavoriteRaceList[UTF8fromUTF16(m_currentIkuseUmaMusume)];
+		jChara["RaceMatchState"] = _GetRaceMatchState();
+	}
+
 	_UpdateRaceList((LPCWSTR)m_currentTurn);
 }
 
@@ -505,9 +547,11 @@ void RaceListWindow::_UpdateRaceList(const std::wstring& turn)
 	m_raceListView.SetRedraw(FALSE);
 	m_raceListView.DeleteAllItems();
 
+	const int currentTurnNumber = m_raceDateLibrary.GetTurnNumberFromTurnName(turn);
+	int nearestFavoriteRaceTurnNumber = 0;
 	size_t i = 0;
 	if (turn.length() && m_showRaceAfterCurrentDate) {
-		i = m_raceDateLibrary.GetTurnNumberFromTurnName(turn);
+		i = currentTurnNumber;
 	}
 	const int32_t state = _GetRaceMatchState();
 
@@ -533,6 +577,16 @@ void RaceListWindow::_UpdateRaceList(const std::wstring& turn)
 		bool insert = false;
 		for (const auto& race : turnOrderedRaceList[i]) {
 			const bool bFavoriteRace = funcIsFavoriteRace(date, race->RaceName());
+
+			// 現在のターン数から一番近いお気に入りレースターンを記録する
+			if (currentTurnNumber > 0 &&				// 現在がデビュー前ではない
+				bFavoriteRace &&		// お気に入りレース
+				nearestFavoriteRaceTurnNumber == 0 &&	// もうすでにお気に入りレースが登録されていない
+				currentTurnNumber <= i)	// 現在の日付以降のレースである
+			{
+				nearestFavoriteRaceTurnNumber = i;
+			}
+
 			if (race->IsMatchState(state) || bFavoriteRace) {
 				if (!insert) {
 					insert = !insert;
@@ -559,6 +613,19 @@ void RaceListWindow::_UpdateRaceList(const std::wstring& turn)
 		}
 	}
 	m_raceListView.SetRedraw(TRUE);
+
+	// 予約レースまでのターン数表示
+	if (nearestFavoriteRaceTurnNumber > 0) {
+		const int remaingTurn = nearestFavoriteRaceTurnNumber - currentTurnNumber;
+		if (remaingTurn > 0) {
+			m_remaingTurn.Format(L"予約まで あと %d ターン", remaingTurn);
+		} else {
+			m_remaingTurn = L"本番";
+		}
+	} else {
+		m_remaingTurn = L"";
+	}
+	DoDataExchange(DDX_LOAD, IDC_EDIT_REMAININGTURN);
 }
 
 int32_t RaceListWindow::_GetRaceMatchState()
@@ -615,6 +682,7 @@ void RaceListWindow::_SetRaceMatchState(int32_t state)
 		const int checkBoxID = IDC_CHECK_LOCATION_SAPPORO + i;
 		CButton(GetDlgItem(checkBoxID)).SetCheck(check);
 	}
+	DoDataExchange(DDX_LOAD);
 }
 
 void RaceListWindow::_SwitchFavoriteRace(int index)
@@ -640,7 +708,9 @@ void RaceListWindow::_SwitchFavoriteRace(int index)
 	}
 	if (m_currentIkuseUmaMusume.length()) {
 		// jsonへ保存
-		m_jsonCharaFavoriteRaceList[UTF8fromUTF16(m_currentIkuseUmaMusume)] = m_currentFavoriteRaceList;
+		auto& jChara = m_jsonCharaFavoriteRaceList[UTF8fromUTF16(m_currentIkuseUmaMusume)];
+		jChara[_GetCurrentFavoriteRaceListName()] = m_currentFavoriteRaceList;
+		jChara["RaceMatchState"] = _GetRaceMatchState();
 	}
 
 	const int top = m_raceListView.GetTopIndex();
@@ -686,6 +756,22 @@ bool RaceListWindow::_IsFavoriteRaceTurn(const std::wstring& turn)
 		}
 	}
 	return false;
+}
+
+std::string RaceListWindow::_GetCurrentFavoriteRaceListName()
+{
+	const int index = m_cmbScenarioRace.GetCurSel();
+	switch (index) {
+	case kURA_AOHARU:
+		return "FavoriteRaceList";
+		break;
+
+	case kMNT:
+		return "FavoriteRaceList_MNT";
+		break;
+	}
+	ATLASSERT(FALSE);
+	return "none";
 }
 
 

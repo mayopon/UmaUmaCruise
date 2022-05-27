@@ -17,7 +17,7 @@ using json = nlohmann::json;
 using namespace CodeConvert;
 
 
-boost::optional<std::wstring> retrieve(
+boost::optional<std::pair<std::wstring, double>> retrieve(
 	simstring::reader& dbr,
 	const std::vector<std::wstring>& ambiguousEventNames,
 	int measure,
@@ -26,10 +26,12 @@ boost::optional<std::wstring> retrieve(
 {
 	// Retrieve similar strings into a string vector.
 	std::vector<std::wstring> xstrs;
+	std::wstring query_org;
 	for (; threshold > minThreshold/*kMinThreshold*/; threshold -= 0.05) {	// 少なくとも一つが見つかるような閾値を探す
 		for (const std::wstring& query : ambiguousEventNames) {
 			dbr.retrieve(query, measure, threshold, std::back_inserter(xstrs));
 			if (xstrs.size()) {
+				query_org = query;
 				break;
 			}
 		}
@@ -37,9 +39,44 @@ boost::optional<std::wstring> retrieve(
 			break;
 		}
 	}
+	if (xstrs.size() >= 2) {
+		INFO_LOG << L"retrieve - 候補が複数あります [" << query_org << L"]";
+		// 類似度が高い方を調べる
+		simstring::ngram_generator ngen(1, false);
+		std::vector<std::wstring> query_ngrams;
+		ngen(query_org, std::back_inserter(query_ngrams));
+		ATLASSERT(query_ngrams.size());
+		if (query_ngrams.empty()) {
+			return boost::none;
+		}
+		std::wstring topSimilrartyText;
+		double topSimilrartyRatio = 0.0;
+		for (const std::wstring& str : xstrs) {
+			std::vector<std::wstring> str_ngrams;
+			ngen(str, std::back_inserter(str_ngrams));
+			ATLASSERT(str_ngrams.size());
+			int matchCount = 0;
+			for (const std::wstring& gram : str_ngrams) {
+				bool found = std::find(query_ngrams.begin(), query_ngrams.end(), gram) != query_ngrams.end();
+				if (found) {
+					++matchCount;
+				}
+			}
+			const int maxSize = static_cast<int>(std::max(query_ngrams.size(), str_ngrams.size()));
+			const double simRatio = static_cast<double>(matchCount) / maxSize;
+			INFO_LOG << L"[" << str << L"] - " << simRatio;
+			if (topSimilrartyRatio < simRatio) {
+				topSimilrartyRatio = simRatio;
+				topSimilrartyText = str;	// 前のより類似度が高い
+			}
+		}
+		INFO_LOG << L"topSimilrartyText -> [" << topSimilrartyText << L"]";
+		return std::make_pair(topSimilrartyText, topSimilrartyRatio);
+	}
+
 	if (xstrs.size()) {
 		INFO_LOG << L"result: " << xstrs.front() << L" threshold: " << threshold;
-		return xstrs.front();
+		return std::make_pair(xstrs.front(), threshold);
 	} else {
 		return boost::none;
 	}
@@ -53,13 +90,12 @@ boost::optional<std::wstring> retrieve(
 )
 {
 	const double kMinThreshold = 0.4;
-	return retrieve(dbr, ambiguousEventNames, measure, threshold, kMinThreshold);
-}
-
-void	EventNameNormalize(std::wstring& eventName)
-{
-	std::wregex rx(L"（進行度[^\\）]+）");
-	eventName = std::regex_replace(eventName, rx, L"");
+	auto optResult = retrieve(dbr, ambiguousEventNames, measure, threshold, kMinThreshold);
+	if (optResult) {
+		return optResult->first;
+	} else {
+		return boost::none;
+	}
 }
 
 // ==============================================================
@@ -73,10 +109,10 @@ bool UmaEventLibrary::LoadUmaMusumeLibrary()
 			for (const json& jsonEvent : jsonEventList) {
 				auto eventElm = *jsonEvent.items().begin();
 				std::wstring eventName = UTF16fromUTF8(eventElm.key());
-				EventNameNormalize(eventName);
 
 				charaEvent.umaEventList.emplace_back();
 				UmaEvent& umaEvent = charaEvent.umaEventList.back();
+				umaEvent.parentCharaEvent = &charaEvent;
 				umaEvent.eventName = eventName;
 
 				int i = 0;
@@ -188,6 +224,8 @@ bool UmaEventLibrary::LoadUmaMusumeLibrary()
 			json jsonCommon;
 			ifs >> jsonCommon;
 			m_kMinThreshold = jsonCommon["Common"]["Simstring"].value<double>("MinThreshold", m_kMinThreshold);
+			m_kUmaMusumeNameMinThreshold = 
+				jsonCommon["Common"]["Simstring"].value<double>("UmaMusumeNameMinThreshold", m_kUmaMusumeNameMinThreshold);			
 		}
 
 		_DBUmaNameInit();
@@ -243,9 +281,9 @@ void UmaEventLibrary::AnbigiousChangeIkuseImaMusume(std::vector<std::wstring> am
 	}
 
 	// Output similar strings from Unicode queries.
-	auto optResult = retrieve(*m_dbUmaNameReader, ambiguousUmaMusumeNames, simstring::cosine, 0.6, m_kMinThreshold);
+	auto optResult = retrieve(*m_dbUmaNameReader, ambiguousUmaMusumeNames, simstring::cosine, 0.6, m_kUmaMusumeNameMinThreshold);
 	if (optResult) {
-		ChangeIkuseiUmaMusume(optResult.get());
+		ChangeIkuseiUmaMusume(optResult->first);
 	}
 }
 
@@ -256,37 +294,37 @@ boost::optional<UmaEventLibrary::UmaEvent> UmaEventLibrary::AmbiguousSearchEvent
 {
 	_DBInit();
 
-	m_lastEventSource.clear();
-
-#ifdef _DEBUG
-
 	auto optOptionResult = retrieve(*m_dbOptionReader, ambiguousEventBottomOptions, simstring::cosine, 1.0, m_kMinThreshold);
 	auto optResult = retrieve(*m_dbReader, ambiguousEventNames, simstring::cosine, 1.0, m_kMinThreshold);
 
-	UmaEvent event1 = optResult ? _SearchEventOptions(optResult.get()) : UmaEvent();
-	UmaEvent event2 = optOptionResult ? _SearchEventOptionsFromBottomOption(optOptionResult.get()) : UmaEvent();
+	UmaEvent event1 = optResult ? _SearchEventOptions(optResult->first) : UmaEvent();
+	UmaEvent event2 = optOptionResult ? _SearchEventOptionsFromBottomOption(optOptionResult->first) : UmaEvent();
 	if (event1.eventName.length() && event2.eventName.length() &&
 		event1.eventName != event2.eventName) 
 	{
 		WARN_LOG << L"AmbiguousSearchEvent イベント名不一致\n"
-			<< L"・イベント名から 1: [" << event1.eventName << L"] (" << ambiguousEventNames.front() << L")\n"
-			<< L"・下部選択肢から 2: [" << event2.eventName << L"] (" << ambiguousEventBottomOptions.front() << L")";
+			<< L"・イベント名から 1: [" << event1.eventName << L"] (" 
+				<< ambiguousEventNames.front() << L") - " << optResult->second << L"\n"
+			<< L"・下部選択肢から 2: [" << event2.eventName << L"] (" 
+				<< ambiguousEventBottomOptions.front() << L") - " << optOptionResult->second;
 	}
 
 	if (optOptionResult) {	// 選択肢からの検索を優先する
-		INFO_LOG << L"AmbiguousSearchEvent result: " << event2.eventName;
-		return _SearchEventOptionsFromBottomOption(optOptionResult.get());
+		if (!optResult || optResult->second < optOptionResult->second) {	// 類似度を比較する
+			//INFO_LOG << L"AmbiguousSearchEvent result: " << event2.eventName;
+			return event2;
+		}
 	}
 	if (optResult) {
-		INFO_LOG << L"AmbiguousSearchEvent result: " << event1.eventName;
-		return _SearchEventOptions(optResult.get());
+		//INFO_LOG << L"AmbiguousSearchEvent result: " << event1.eventName;
+		return event1;
 
 	} else {
-		INFO_LOG << L"AmbiguousSearchEvent: not found";
+		//INFO_LOG << L"AmbiguousSearchEvent: not found";
 		return boost::none;
 	}
-#else
 
+#if 0
 	auto optOptionResult = retrieve(*m_dbOptionReader, ambiguousEventBottomOptions, simstring::cosine, 1.0, m_kMinThreshold);
 	if (optOptionResult) {	// 選択肢からの検索を優先する
 		return _SearchEventOptionsFromBottomOption(optOptionResult.get());
@@ -413,7 +451,6 @@ UmaEventLibrary::UmaEvent UmaEventLibrary::_SearchEventOptions(const std::wstrin
 	if (m_currentIkuseiUmaEvent) {
 		for (const auto& umaEvent : m_currentIkuseiUmaEvent->umaEventList) {
 			if (umaEvent.eventName == eventName) {
-				m_lastEventSource = m_currentIkuseiUmaEvent->name;
 				return umaEvent;
 			}
 		}
@@ -423,7 +460,6 @@ UmaEventLibrary::UmaEvent UmaEventLibrary::_SearchEventOptions(const std::wstrin
 	for (const auto& charaEvent : m_supportEventList) {
 		for (const auto& umaEvent : charaEvent->umaEventList) {
 			if (umaEvent.eventName == eventName) {
-				m_lastEventSource = charaEvent->name;
 				return umaEvent;
 			}
 		}
@@ -442,7 +478,6 @@ UmaEventLibrary::UmaEvent UmaEventLibrary::_SearchEventOptionsFromBottomOption(c
 					continue;
 				}
 				if (it->option == bottomOption) {	// 最後の選択肢を比較
-					m_lastEventSource = m_currentIkuseiUmaEvent->name;
 					return umaEvent;
 				}
 				break;
@@ -458,7 +493,6 @@ UmaEventLibrary::UmaEvent UmaEventLibrary::_SearchEventOptionsFromBottomOption(c
 					continue;
 				}
 				if (it->option == bottomOption) {	// 最後の選択肢を比較
-					m_lastEventSource = charaEvent->name;
 					return umaEvent;
 				}
 				break;

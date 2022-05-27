@@ -15,6 +15,10 @@
 #include "Utility\timer.h"
 #include "win32-darkmode\DarkMode.h"
 
+#include "GDIWindowCapture.h"
+#include "DesktopDuplication.h"
+#include "WindowsGraphicsCaptureWrapper.h"
+
 #include "ConfigDlg.h"
 
 using json = nlohmann::json;
@@ -74,7 +78,7 @@ bool SaveScreenShot(const std::wstring& device, const std::wstring& filePath)
 
 /////////////////////////////////////////////////////////////////////////////
 
-CMainDlg::CMainDlg() : m_raceListWindow(m_config)
+CMainDlg::CMainDlg() : m_raceListWindow(m_config), m_wndScreenShotButton(this, 1)
 {
 }
 
@@ -145,7 +149,7 @@ LRESULT CMainDlg::OnInitDialog(UINT, WPARAM, LPARAM, BOOL&)
 		const int IDC_EFFECT = IDC_EDIT_EFFECT1 + i;
 
 		// これを設定しないとフォント表示がおかしくなる
-		GetDlgItem(IDC_EFFECT).SendMessage(EM_SETLANGOPTIONS, 0, (LPARAM)IMF_UIFONTS/*dwLangOptions*/);
+		GetDlgItem(IDC_EFFECT).SendMessage(EM_SETLANGOPTIONS, 0, (LPARAM)IMF_UIFONTS);
 		//GetDlgItem(IDC_EFFECT).SetFont(m_effectFont);
 	}
 
@@ -160,19 +164,8 @@ LRESULT CMainDlg::OnInitDialog(UINT, WPARAM, LPARAM, BOOL&)
 	});
 
 	// UmaMusumeLibraryを読み込み
-	if (!m_umaEventLibrary.LoadUmaMusumeLibrary()) {
-		ERROR_LOG << L"LoadUmaMusumeLibrary failed";
-		ATLASSERT(FALSE);
-	} else {
-		// 育成ウマ娘のリストをコンボボックスに追加
-		CString currentProperty;
-		for (const auto& uma : m_umaEventLibrary.GetIkuseiUmaMusumeEventList()) {
-			if (currentProperty != uma->property.c_str()) {
-				currentProperty = uma->property.c_str();
-				m_cmbUmaMusume.AddString(currentProperty);
-			}
-			m_cmbUmaMusume.AddString(uma->name.c_str());
-		}
+	if (!_ReloadUmaMusumeLibrary()) {
+		MessageBox(L"UmaMusumeLibrary.jsonの読み込みに失敗");
 	}
 
 	// SkillLibraryを読み込み
@@ -225,6 +218,9 @@ LRESULT CMainDlg::OnInitDialog(UINT, WPARAM, LPARAM, BOOL&)
 					CRect rc(windowRect[0], windowRect[1], windowRect[2], windowRect[3]);
 					SetWindowPos(NULL, rc.left, rc.top, 0, 0, SWP_NOSIZE | SWP_NOOWNERZORDER);
 				}
+				if (m_config.windowTopMost) {
+					SetWindowPos(HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+				}
 
 				m_bShowRaceList = jsonSetting["MainDlg"].value<bool>("ShowRaceList", m_bShowRaceList);
 			}
@@ -251,7 +247,7 @@ LRESULT CMainDlg::OnInitDialog(UINT, WPARAM, LPARAM, BOOL&)
 		ERROR_LOG << L"LoadConfig failed: " << (LPCWSTR)(CA2W(e.what()));
 		ATLASSERT(FALSE);
 	}
-	ChangeWindowTitle(L"init suscess!");
+	ChangeWindowTitle(L"init success!");
 
 	if (m_config.autoStart) {
 		CButton(GetDlgItem(IDC_CHECK_START)).SetCheck(BST_CHECKED);
@@ -274,11 +270,12 @@ LRESULT CMainDlg::OnDestroy(UINT, WPARAM, LPARAM, BOOL&)
 	if (m_threadAutoDetect.joinable()) {
 		m_cancelAutoDetect = true;
 		m_threadAutoDetect.detach();
-		::Sleep(2 * 1000);
+		::Sleep(5 * 1000);
 	}
 
 	return 0;
 }
+
 
 LRESULT CMainDlg::OnAppAbout(WORD, WORD, HWND, BOOL&)
 {
@@ -345,6 +342,7 @@ void CMainDlg::OnShowConfigDlg(UINT uNotifyCode, int nID, CWindow wndCtl)
 {
 	const bool prevPopupRaceListWindow = m_config.popupRaceListWindow;
 	const int prevTheme = m_config.theme;
+	const int prevSCMethod = m_config.screenCaptureMethod;
 	ConfigDlg dlg(m_config);
 	auto ret = dlg.DoModal(m_hWnd);
 	if (ret == IDOK) {
@@ -358,6 +356,17 @@ void CMainDlg::OnShowConfigDlg(UINT uNotifyCode, int nID, CWindow wndCtl)
 			m_previewWindow.OnThemeChanged();
 			m_popupRichEdit.OnThemeChanged();
 		}
+		if (prevSCMethod != m_config.screenCaptureMethod) {
+			std::unique_lock lock(m_mtxScreennShotWindow);
+			m_screenshotWindow.reset();
+		}
+
+		SetWindowPos(m_config.windowTopMost ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);	
+	}
+	if (dlg.IsUpdateLibrary()) {
+		if (!_ReloadUmaMusumeLibrary()) {
+			MessageBox(L"UmaMusumeLibrary.jsonの読み込みに失敗");
+		}
 	}
 }
 
@@ -368,6 +377,34 @@ void CMainDlg::OnShowPreviewWindow(UINT uNotifyCode, int nID, CWindow wndCtl)
 
 void CMainDlg::OnTimer(UINT_PTR nIDEvent)
 {
+	if (nIDEvent == kSearchUmaMusumeNameTimerID) {
+		KillTimer(kSearchUmaMusumeNameTimerID);
+
+		CString name;
+		m_cmbUmaMusume.GetWindowText(name.GetBuffer(128), 128);
+		name.ReleaseBuffer();
+		ATLTRACE(L"name: %s\n", (LPCWSTR)name);
+
+		m_cmbUmaMusume.SetRedraw(FALSE);
+		// m_cmbUmaMusume.ResetContent();	だとなんかおかしくなるので１個づつ消す	
+		while (m_cmbUmaMusume.GetCount()) {
+			m_cmbUmaMusume.DeleteString(0);
+		}
+
+		for (const auto& uma : m_umaEventLibrary.GetIkuseiUmaMusumeEventList()) {
+			auto secondNameEndPos = uma->name.find(L"】");
+			ATLASSERT(secondNameEndPos != std::wstring::npos);
+
+			if (uma->name.find(name, secondNameEndPos + 1) != std::wstring::npos) {
+				int n = m_cmbUmaMusume.AddString(uma->name.c_str());
+			}
+		}
+		const int index = m_cmbUmaMusume.GetCurSel();
+		m_cmbUmaMusume.SetRedraw(TRUE);
+
+		m_cmbUmaMusume.ShowDropDown();
+
+	}
 }
 
 // コンボボックスから育成ウマ娘が変更された場合
@@ -381,9 +418,48 @@ void CMainDlg::OnSelChangeUmaMusume(UINT uNotifyCode, int nID, CWindow wndCtl)
 	m_cmbUmaMusume.GetLBText(index, umaName);
 	if (umaName.Left(1) == L"☆") {
 		m_umaEventLibrary.ChangeIkuseiUmaMusume(L"");
+		ChangeWindowTitle(L"育成ウマ娘変更: none");
 		return;
 	}
 	m_umaEventLibrary.ChangeIkuseiUmaMusume((LPCWSTR)umaName);
+	ChangeWindowTitle(std::wstring(L"育成ウマ娘変更: ") + (LPCWSTR)umaName);
+}
+
+void CMainDlg::OnUmaMusumeEditChange(UINT uNotifyCode, int nID, CWindow wndCtl)
+{
+	SetTimer(kSearchUmaMusumeNameTimerID, kSearchUmaMusumeNameTimerInterval);
+}
+
+// 育成ウマ娘名ドロップダウンが閉じられた
+void CMainDlg::OnUmaMusumeDropDownClose(UINT uNotifyCode, int nID, CWindow wndCtl)
+{
+	CString text;
+	m_cmbUmaMusume.GetLBText(0, text);
+	if (text.Left(1) == L"☆") {
+		return;
+	}
+
+	const int index = m_cmbUmaMusume.GetCurSel();
+
+	// 何も書かずに閉じたので、育成ウマ娘名を設定しない
+	if (m_cmbUmaMusume.GetWindowTextLength() == 0 || m_cmbUmaMusume.GetCount() == 0) {
+		m_umaEventLibrary.ChangeIkuseiUmaMusume(L"");
+		ChangeWindowTitle(L"育成ウマ娘変更: none");
+
+	} else if (index == -1) {
+		// コンボボックス上の一番上の育成ウマ娘を選択する
+		m_cmbUmaMusume.SetCurSel(0);
+		OnSelChangeUmaMusume(0, 0, NULL);
+	}
+
+	//CString name;
+	//m_cmbUmaMusume.GetWindowText(name.GetBuffer(128), 128);
+	//name.ReleaseBuffer();
+	//ATLTRACE(L"%d, name OnUmaMusumeDropDownClose: %s\n", index, (LPCWSTR)name);
+
+	Utility::timer timer;
+	_ReloadUmaMusumeLibrary(true);
+	ATLTRACE("combo closed: %s\n", timer.format().c_str());
 }
 
 // ドッキング状態ならレース一覧ウィンドウを同時に動かす
@@ -505,13 +581,14 @@ void CMainDlg::OnScreenShot(UINT uNotifyCode, int nID, CWindow wndCtl)
 
 			_UpdateEventOptions(*optUmaEvent);
 
-			m_eventSource = m_umaEventLibrary.GetLastEventSource().c_str();
+			m_eventSource = optUmaEvent->parentCharaEvent->name.c_str();
 			DoDataExchange(DDX_LOAD, IDC_EDIT_EVENT_SOURCE);
 		}
 
 
 		// 現在ターン
-		m_raceListWindow.AnbigiousChangeCurrentTurn(m_umaTextRecoginzer.GetCurrentTurn());
+		bool ikuseiTop = m_umaTextRecoginzer.IsTrainingMenu() || m_umaTextRecoginzer.IsIkuseiTop();
+		m_raceListWindow.AnbigiousChangeCurrentTurn(m_umaTextRecoginzer.GetCurrentTurn(), ikuseiTop);
 
 		// レース距離
 		m_raceListWindow.EntryRaceDistance(m_umaTextRecoginzer.GetEntryRaceDistance());
@@ -530,8 +607,14 @@ void CMainDlg::OnScreenShot(UINT uNotifyCode, int nID, CWindow wndCtl)
 			return;
 		}
 		auto ssFolderPath = GetExeDirectory() / L"screenshot";
-		if (!fs::is_directory(ssFolderPath)) {
-			fs::create_directory(ssFolderPath);
+		// オプションで設定されたフォルダ
+		if (!m_config.screenShotFolder.empty() && boost::filesystem::is_directory(m_config.screenShotFolder)) {
+			ssFolderPath = m_config.screenShotFolder;
+		} else {
+			// 既定のフォルダ
+			if (!fs::is_directory(ssFolderPath)) {
+				fs::create_directory(ssFolderPath);
+			}
 		}
 
 		auto ssPath = ssFolderPath / (L"screenshot_" + std::to_wstring(std::time(nullptr)) + L".png");
@@ -539,11 +622,12 @@ void CMainDlg::OnScreenShot(UINT uNotifyCode, int nID, CWindow wndCtl)
 			ssPath = ssFolderPath / L"screenshot.png";
 		}
 		// 
-		auto image = m_umaTextRecoginzer.ScreenShot();
+		auto image = _ScreenShotUmaWindow();
 		if (!image) {
 			ChangeWindowTitle(L"スクリーンショットに失敗...");
 			return;
 		}
+
 		auto pngEncoder = GetEncoderByMimeType(L"image/png");
 		auto ret = image->Save(ssPath.c_str(), &pngEncoder->Clsid);
 		bool success = ret == Gdiplus::Ok;
@@ -570,15 +654,55 @@ void CMainDlg::OnStart(UINT uNotifyCode, int nID, CWindow wndCtl)
 		{
 			INFO_LOG << L"thread begin";
 
+			auto funcChangeIkuseiUmaMusumeName = [this](const std::vector<std::wstring>& umaMusumeNameList) {
+				std::wstring prevUmaName = m_umaEventLibrary.GetCurrentIkuseiUmaMusume();
+				m_umaEventLibrary.AnbigiousChangeIkuseImaMusume(umaMusumeNameList);
+				std::wstring nowUmaName = m_umaEventLibrary.GetCurrentIkuseiUmaMusume();
+				if (prevUmaName != nowUmaName) {
+					// コンボボックスを変更
+					const int count = m_cmbUmaMusume.GetCount();
+					for (int i = 0; i < count; ++i) {
+						CString name;
+						m_cmbUmaMusume.GetLBText(i, name);
+						if (name == nowUmaName.c_str()) {
+							m_cmbUmaMusume.SetCurSel(i);
+							break;
+						}
+					}
+				}
+			};
+
+			// 初回のみ能力詳細からウマ娘名を取得する
+			auto ssImage2 = _ScreenShotUmaWindow();
+			std::wstring ikuseiUmaMusumeName =  m_umaTextRecoginzer.GetIkuseiUmaMusumeName(ssImage2.get());
+			if (ikuseiUmaMusumeName.length()) {
+				funcChangeIkuseiUmaMusumeName(std::vector<std::wstring>({ ikuseiUmaMusumeName }));
+			}
+			ssImage2.reset();
+
+			const auto milisecInterval = m_config.refreshInterval * 1000;
 			int count = 0;
 			while (!m_cancelAutoDetect.load()) {
 				Utility::timer timer;
 
 				const auto begin = std::chrono::steady_clock::now();
 
-				auto ssImage = m_umaTextRecoginzer.ScreenShot();
+				auto ssImage = _ScreenShotUmaWindow();	// m_umaTextRecoginzer.ScreenShot();
+				if (ssImage) {
+					const int imageWidth = ssImage->GetWidth();
+					const int imageHeight = ssImage->GetHeight();
+					if (imageHeight < imageWidth) {	// 横画面なら何もしない
+						m_previewWindow.UpdateImage(ssImage.release());
+						::Sleep(milisecInterval);
+						continue;
+					}
+				}
 				bool success = m_umaTextRecoginzer.TextRecognizer(ssImage.get());
 				if (success) {
+					if (m_cancelAutoDetect.load()) {
+						break;	// cancel
+					}
+
 					bool updateImage = true;
 					if (m_config.stopUpdatePreviewOnTraining && !m_umaTextRecoginzer.IsTrainingMenu()) {
 						updateImage = false;
@@ -588,21 +712,7 @@ void CMainDlg::OnStart(UINT uNotifyCode, int nID, CWindow wndCtl)
 					}
 
 					// 育成ウマ娘名
-					std::wstring prevUmaName = m_umaEventLibrary.GetCurrentIkuseiUmaMusume();
-					m_umaEventLibrary.AnbigiousChangeIkuseImaMusume(m_umaTextRecoginzer.GetUmaMusumeName());
-					std::wstring nowUmaName = m_umaEventLibrary.GetCurrentIkuseiUmaMusume();
-					if (prevUmaName != nowUmaName) {
-						// コンボボックスを変更
-						const int count = m_cmbUmaMusume.GetCount();
-						for (int i = 0; i < count; ++i) {
-							CString name;
-							m_cmbUmaMusume.GetLBText(i, name);
-							if (name == nowUmaName.c_str()) {
-								m_cmbUmaMusume.SetCurSel(i);
-								break;
-							}
-						}
-					}
+					funcChangeIkuseiUmaMusumeName(m_umaTextRecoginzer.GetUmaMusumeName());
 
 					// イベント検索
 					auto optUmaEvent = m_umaEventLibrary.AmbiguousSearchEvent(
@@ -614,13 +724,14 @@ void CMainDlg::OnStart(UINT uNotifyCode, int nID, CWindow wndCtl)
 
 						_UpdateEventOptions(*optUmaEvent);
 
-						m_eventSource = m_umaEventLibrary.GetLastEventSource().c_str();
+						m_eventSource = optUmaEvent->parentCharaEvent->name.c_str();
 						DoDataExchange(DDX_LOAD, IDC_EDIT_EVENT_SOURCE);
 					}
 
 
 					// 現在ターン
-					m_raceListWindow.AnbigiousChangeCurrentTurn(m_umaTextRecoginzer.GetCurrentTurn());
+					bool ikuseiTop = m_umaTextRecoginzer.IsTrainingMenu() || m_umaTextRecoginzer.IsIkuseiTop();
+					m_raceListWindow.AnbigiousChangeCurrentTurn(m_umaTextRecoginzer.GetCurrentTurn(), ikuseiTop);
 
 					// レース距離
 					m_raceListWindow.EntryRaceDistance(m_umaTextRecoginzer.GetEntryRaceDistance());
@@ -631,7 +742,6 @@ void CMainDlg::OnStart(UINT uNotifyCode, int nID, CWindow wndCtl)
 					ChangeWindowTitle((LPCWSTR)title);
 
 					// wait
-					const auto milisecInterval = m_config.refreshInterval * 1000;
 					auto end = std::chrono::steady_clock::now();
 					auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
 					do {
@@ -655,6 +765,11 @@ void CMainDlg::OnStart(UINT uNotifyCode, int nID, CWindow wndCtl)
 				}
 			}
 			// finish
+			{
+				std::unique_lock lock(m_mtxScreennShotWindow);
+				m_screenshotWindow.reset();
+			}
+
 			if (m_threadAutoDetect.joinable()) {
 				CButton btnStart = GetDlgItem(IDC_CHECK_START);
 				btnStart.SetWindowText(L"スタート");
@@ -662,15 +777,12 @@ void CMainDlg::OnStart(UINT uNotifyCode, int nID, CWindow wndCtl)
 				m_threadAutoDetect.detach();
 			}
 		});
-		//OnTimer(kAutoOCRTimerID);
-		//SetTimer(kAutoOCRTimerID, kAutoOCRTimerInterval);
 	} else {
 		if (m_threadAutoDetect.joinable()) {
 			btnStart.SetWindowText(L"停止中...");
 			btnStart.EnableWindow(FALSE);
 			m_cancelAutoDetect = true;
 		}
-		//KillTimer(kAutoOCRTimerID);
 	}
 }
 
@@ -687,7 +799,7 @@ void CMainDlg::OnEventNameChanged(UINT uNotifyCode, int nID, CWindow wndCtl)
 		ChangeWindowTitle(optUmaEvent->eventName);
 		_UpdateEventOptions(*optUmaEvent);
 
-		m_eventSource = m_umaEventLibrary.GetLastEventSource().c_str();
+		m_eventSource = optUmaEvent->parentCharaEvent->name.c_str();
 		DoDataExchange(DDX_LOAD, IDC_EDIT_EVENT_SOURCE);
 	}
 	
@@ -874,6 +986,47 @@ BOOL CMainDlg::OnSetCursor(CWindow wnd, UINT nHitTest, UINT message)
 	return 0;
 }
 
+// スクリーンショット 右クリック
+void CMainDlg::OnScreenShotButtonUp(UINT nFlags, CPoint point)
+{
+	auto ssFolderPath = GetExeDirectory() / L"screenshot";
+	if (fs::is_directory(m_config.screenShotFolder)) {
+		ssFolderPath = m_config.screenShotFolder;
+	}
+	::ShellExecute(NULL, NULL, ssFolderPath.c_str(), NULL, NULL, SW_NORMAL);
+}
+
+
+bool CMainDlg::_ReloadUmaMusumeLibrary(bool initComboOnly /*= false*/)
+{
+	if (!initComboOnly && !m_umaEventLibrary.LoadUmaMusumeLibrary()) {
+		ERROR_LOG << L"LoadUmaMusumeLibrary failed";
+		ATLASSERT(FALSE);
+		return false;
+	} else {
+		// 育成ウマ娘のリストをコンボボックスに追加
+		m_cmbUmaMusume.SetRedraw(FALSE);
+		m_cmbUmaMusume.ResetContent();
+
+		const std::wstring& currentIkuseiUmaMusume = m_umaEventLibrary.GetCurrentIkuseiUmaMusume();
+
+		CString currentProperty;
+		for (const auto& uma : m_umaEventLibrary.GetIkuseiUmaMusumeEventList()) {
+			if (currentProperty != uma->property.c_str()) {
+				currentProperty = uma->property.c_str();
+				m_cmbUmaMusume.AddString(currentProperty);
+			}
+
+			int n = m_cmbUmaMusume.AddString(uma->name.c_str());
+			if (uma->name == currentIkuseiUmaMusume) {
+				m_cmbUmaMusume.SetCurSel(n);
+			}
+		}
+		m_cmbUmaMusume.SetRedraw(TRUE);
+		m_cmbUmaMusume.Invalidate();
+	}
+	return true;
+}
 
 // レース一覧をメインダイアログにドッキングさせるか、ポップアップウィンドウ化させる
 void CMainDlg::_DockOrPopupRaceListWindow()
@@ -1076,8 +1229,50 @@ void CMainDlg::_UpdateEventEffect(CRichEditCtrl richEdit, const std::wstring& ef
 	// ステータス上昇降下へ色を付ける
 	funcChangeTextColor(richEdit, L"+", m_effectStatusInc);
 	funcChangeTextColor(richEdit, L"-", m_effectStatusDec);
+	funcChangeTextColor(richEdit, L"<打ち切り>", m_effectStatusDec);
+	
 	
 	richEdit.SetSel(0, 0);
+}
+
+std::unique_ptr<Gdiplus::Bitmap> CMainDlg::_ScreenShotUmaWindow()
+{
+	std::unique_lock lock(m_mtxScreennShotWindow);
+	if (!m_screenshotWindow) {
+		switch (m_config.screenCaptureMethod) {
+		case Config::kGDI:
+			m_screenshotWindow.reset(new GDIWindowCapture());
+			break;
+
+		case Config::kDesktopDuplication:
+			m_screenshotWindow.reset(new DesktopDuplication());
+			break;
+
+		case Config::kWindowsGraphicsCapture:
+			if (WindowsGraphicsCaptureWrapper::IsDllLoaded()) {
+				m_screenshotWindow.reset(WindowsGraphicsCaptureWrapper::CreateWindowsGraphicsCapture());
+			} else {
+				m_screenshotWindow.reset(new GDIWindowCapture());
+			}
+			break;
+
+		default:
+			ERROR_LOG << L"m_config.screenCaptureMethod is unknown";
+			ATLASSERT(FALSE);
+			m_screenshotWindow.reset(new GDIWindowCapture());
+			//return nullptr;
+		}
+	}
+
+	LPCWSTR className = m_targetClassName.GetLength() ? (LPCWSTR)m_targetClassName : nullptr;
+	LPCWSTR windowName = m_targetWindowName.GetLength() ? (LPCWSTR)m_targetWindowName : nullptr;
+	CWindow hwndTarget = ::FindWindow(className, windowName);
+	if (!hwndTarget) {
+		return nullptr;
+	}
+
+	auto ss = m_screenshotWindow->ScreenShot(hwndTarget);
+	return ss;
 }
 
 
